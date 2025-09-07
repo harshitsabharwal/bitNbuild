@@ -1,30 +1,27 @@
 import React from 'react';
+import logo from '../assets/logo1main.jpg'; // Import the new logo
 
 const AuthLayout = ({ children }) => {
     return (
-        <div className="flex min-h-screen w-full bg-white">
-            {/* Form Panel */}
-            <div className="flex flex-1 flex-col justify-center items-center p-8 overflow-y-auto">
+        <div className="min-h-screen flex">
+            {/* Form Section */}
+            <div className="w-full lg:w-1/2 flex items-center justify-center p-8 md:p-12">
                 <div className="w-full max-w-md">
                     {children}
                 </div>
             </div>
 
-            {/* Image Panel */}
-            <div className="relative hidden lg:flex flex-1 items-center justify-center bg-blue-600">
-                <div 
-                    className="absolute inset-0 bg-cover bg-center"
-                    style={{ backgroundImage: "url('https://placehold.co/1000x1200/3b82f6/ffffff?text=EduConnect&font=raleway')" }}
-                >
-                   <div className="absolute inset-0 bg-blue-600 opacity-50"></div>
-                </div>
-                <div className="relative z-10 text-center text-white p-8">
-                    <h1 className="text-5xl font-bold mb-4">EduConnect</h1>
-                    <p className="text-xl">Your journey to knowledge begins here.</p>
-                </div>
+            {/* Branding Section - Updated with logo1main.jpg */}
+            <div className="hidden lg:flex w-1/2 bg-gray-800 items-center justify-center p-12 text-white text-center">
+                <img 
+                    src={logo} 
+                    alt="SkillForge Logo" 
+                    className="max-w-xs rounded-full" // Control the size of the logo
+                />
             </div>
         </div>
     );
 };
 
 export default AuthLayout;
+

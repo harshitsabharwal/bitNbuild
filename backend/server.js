@@ -1,4 +1,3 @@
-// --- Dependencies ---
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -8,7 +7,7 @@ const cors = require('cors');
 // --- Basic Setup ---
 const app = express();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = 'your-super-secret-key-that-should-be-in-a-env-file'; 
+const JWT_SECRET = 'your-super-secret-key-that-should-be-in-a-env-file';
 
 // --- Middleware ---
 app.use(cors());
@@ -26,7 +25,57 @@ mongoose.connect(MONGO_URI).then(() => {
 
 // --- Mongoose Schemas ---
 
-// User Schema
+const ReviewSchema = new mongoose.Schema({
+    student: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    rating: { type: Number, required: true, min: 1, max: 5 },
+    comment: { type: String, trim: true },
+    studentName: { type: String, required: true } // Denormalize for easy display
+}, { timestamps: true });
+
+const LessonSchema = new mongoose.Schema({
+    title: { type: String, required: true, trim: true },
+    duration: { type: String, trim: true },
+    description: { type: String, trim: true }
+});
+
+const ModuleSchema = new mongoose.Schema({
+    title: { type: String, required: true, trim: true },
+    description: { type: String, trim: true },
+    lessons: [LessonSchema]
+});
+
+const TeacherInfoSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    email: { type: String, required: true },
+    experience: { type: String },
+    about: { type: String }
+});
+
+const CourseSchema = new mongoose.Schema({
+    courseName: { type: String, required: true, trim: true },
+    courseFee: { type: Number, required: true, default: 0 },
+    courseDescription: { type: String, required: true, trim: true },
+    duration: { type: String, required: true },
+    level: { type: String, required: true },
+    category: { type: String, required: true },
+    teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    teacherInfo: TeacherInfoSchema,
+    modules: [ModuleSchema],
+    status: { type: String, enum: ['Draft', 'Published'], default: 'Published' }, // Defaulting to published for students to see
+    students: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    reviews: [ReviewSchema]
+}, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
+
+// Mongoose virtual to calculate average rating
+CourseSchema.virtual('averageRating').get(function() {
+    if (this.reviews && this.reviews.length > 0) {
+        const total = this.reviews.reduce((acc, item) => item.rating + acc, 0);
+        return (total / this.reviews.length);
+    }
+    return 0;
+});
+
+
 const UserSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true, trim: true, lowercase: true },
     password: { type: String, required: true },
@@ -40,19 +89,10 @@ const UserSchema = new mongoose.Schema({
     phoneOtp: { type: String },
     phoneOtpExpires: { type: Date },
     isPhoneVerified: { type: Boolean, default: false },
+    enrolledCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }] // Added for enrolled courses
 }, { timestamps: true });
 
 const User = mongoose.model('User', UserSchema);
-
-// Course Schema
-const CourseSchema = new mongoose.Schema({
-    title: { type: String, required: true, trim: true },
-    description: { type: String, required: true, trim: true },
-    teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    status: { type: String, enum: ['Draft', 'Published'], default: 'Draft' },
-    students: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-}, { timestamps: true });
-
 const Course = mongoose.model('Course', CourseSchema);
 
 
@@ -72,14 +112,11 @@ const authMiddleware = (req, res, next) => {
 };
 
 
-// --- API Routes ---
-
-// Auth Routes
+// --- Route Definitions ---
 const authRouter = express.Router();
-app.use('/api/auth', authRouter);
+const courseRouter = express.Router();
 
-// @route   POST /api/auth/register
-// @desc    Step 1 of Registration
+// --- Auth Route Definitions ---
 authRouter.post('/register', async (req, res) => {
     try {
         const { email, password, role, firstName, lastName, age, location, phone, qualification } = req.body;
@@ -119,9 +156,6 @@ authRouter.post('/register', async (req, res) => {
         res.status(500).json({ message: 'Server error during registration.' });
     }
 });
-
-// @route   POST /api/auth/verify
-// @desc    Step 2 of Registration
 authRouter.post('/verify', async (req, res) => {
     try {
         const { phone, otp } = req.body;
@@ -158,9 +192,6 @@ authRouter.post('/verify', async (req, res) => {
         res.status(500).json({ message: 'Server error during verification.' });
     }
 });
-
-// @route   POST /api/auth/login
-// @desc    Log in an existing user
 authRouter.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -195,43 +226,93 @@ authRouter.post('/login', async (req, res) => {
 });
 
 
-// --- Course Routes ---
-const courseRouter = express.Router();
-app.use('/api/courses', authMiddleware, courseRouter);
-
-// @route   GET /api/courses
-// @desc    Get all courses for the logged-in teacher
-courseRouter.get('/', async (req, res) => {
+// --- Course Route Definitions ---
+// Teacher: Get own courses
+courseRouter.get('/', authMiddleware, async (req, res) => {
     try {
         const courses = await Course.find({ teacher: req.user.id }).sort({ createdAt: -1 });
         res.json(courses);
-    } catch (error) {
-        console.error(error.message);
-        res.status(500).send('Server Error');
-    }
+    } catch (error) { res.status(500).send('Server Error'); }
 });
-
-// @route   POST /api/courses
-// @desc    Create a new course
-courseRouter.post('/', async (req, res) => {
-    const { title, description } = req.body;
-    if (!title || !description) {
-        return res.status(400).json({ message: 'Title and description are required.' });
-    }
+// Teacher: Create a course
+courseRouter.post('/', authMiddleware, async (req, res) => {
     try {
-        const newCourse = new Course({
-            title,
-            description,
-            teacher: req.user.id
-        });
+        const newCourse = new Course({ ...req.body, teacher: req.user.id });
         const course = await newCourse.save();
         res.json(course);
     } catch (error) {
         console.error(error.message);
+        res.status(400).json({ message: error.message });
+    }
+});
+
+// Student: Get all available/published courses
+courseRouter.get('/available', authMiddleware, async (req, res) => {
+    try {
+        const courses = await Course.find({ status: 'Published' })
+            .populate('teacher', 'firstName lastName')
+            .sort({ createdAt: -1 });
+        res.json(courses);
+    } catch (error) { res.status(500).send('Server Error'); }
+});
+
+// Student: Get enrolled courses
+courseRouter.get('/enrolled', authMiddleware, async (req, res) => {
+     try {
+        const courses = await Course.find({ students: req.user.id });
+        res.json(courses);
+    } catch (error) { res.status(500).send('Server Error'); }
+});
+
+
+// Student: Get single course details
+courseRouter.get('/:id', authMiddleware, async (req, res) => {
+    try {
+        const course = await Course.findById(req.params.id).populate('reviews.student', 'firstName');
+        if (!course) return res.status(404).json({ message: 'Course not found' });
+        res.json(course);
+    } catch (error) { res.status(500).send('Server Error'); }
+});
+
+// Student: Enroll in a course
+courseRouter.post('/:id/enroll', authMiddleware, async (req, res) => {
+    try {
+        // Add student to course's student list
+        await Course.findByIdAndUpdate(req.params.id, { $addToSet: { students: req.user.id } });
+        // Add course to student's enrolled list
+        await User.findByIdAndUpdate(req.user.id, { $addToSet: { enrolledCourses: req.params.id } });
+        res.json({ message: 'Successfully enrolled!' });
+    } catch (error) { res.status(500).send('Server Error'); }
+});
+
+// Student: Add a review to a course
+courseRouter.post('/:id/reviews', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        const course = await Course.findById(req.params.id);
+
+        if (!course.students.includes(req.user.id)) {
+            return res.status(403).json({ message: 'You must be enrolled to review this course.' });
+        }
+        
+        const newReview = {
+            ...req.body,
+            student: req.user.id,
+            studentName: `${user.firstName} ${user.lastName}`
+        };
+
+        course.reviews.unshift(newReview);
+        await course.save();
+        res.json(course.reviews[0]);
+    } catch (error) {
+        console.error(error.message);
         res.status(500).send('Server Error');
     }
 });
 
+// --- Use Routers ---
+app.use('/api/auth', authRouter);
+app.use('/api/courses', courseRouter);
 
 // --- Start The Server ---
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
